@@ -1,0 +1,8 @@
+{
+  "leagueName": "Our Champions League",
+  "managers": [
+    { "name": "You", "teamName": "Your team name", "teamId": "PASTE_TEAM_ID_1" },
+    { "name": "Friend 1", "teamName": "Their team name", "teamId": "PASTE_TEAM_ID_2" },
+    { "name": "Friend 2", "teamName": "Their team name", "teamId": "PASTE_TEAM_ID_3" }
+  ]
+}
