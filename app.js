@@ -4,6 +4,7 @@
   const view = $('#view');
   const LINE_COLORS = ['#E6D3AE', '#3D6BF2', '#C3C8D1', '#E0877C', '#8FBF98', '#B58BE8'];
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const DISPLAY_TZ = 'America/Los_Angeles'; // all times shown in Pacific (PST/PDT)
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -68,13 +69,15 @@
     const prevRanks = before ? new Map(ranking(before).map((r) => [r.m.id, r.rank])) : null;
     const rows = ranking(md);
     const lastRank = rows[rows.length - 1].rank;
-    view.innerHTML = `
+    view.innerHTML = deadlineCard() + `
       <h2>Standings after matchday ${md}</h2>
       ${usesOfficial(md) ? '<p class="note">Official league table from the game</p>' : ''}
       <table class="standings">
         <thead><tr><th>#</th><th>Manager</th><th class="num">MD ${md}</th><th class="num">Total</th></tr></thead>
         <tbody>${rows.map((r) => {
           let move = '<span class="move same">–</span>';
+          if (!prevRanks && r.m.trend === 'up') move = '<span class="move up" aria-label="moved up">▲</span>';
+          if (!prevRanks && r.m.trend === 'down') move = '<span class="move down" aria-label="moved down">▼</span>';
           if (prevRanks) {
             const d = prevRanks.get(r.m.id) - r.rank;
             if (d > 0) move = `<span class="move up" aria-label="up ${d}">▲${d}</span>`;
@@ -107,7 +110,7 @@
           <div class="owners">Picked by ${esc(best.owners.join(', '))}</div>
         </div></div></div>` : '';
 
-    view.innerHTML = `
+    view.innerHTML = deadlineCard() + `
       <h2>Player of the day</h2>${sticker || '<p class="empty">No player data for this matchday yet.</p>'}
       <h2>Won the day</h2>
       <div class="winner"><strong>${esc(tied.join(' and '))}</strong><span class="big" data-count="${top.e?.points ?? 0}">${top.e?.points ?? 0}</span></div>
@@ -128,7 +131,7 @@
             ${cap ? `<dt>Captain</dt><dd>${esc(cap.name)}, ${cap.points} × 2 = ${cap.points * 2}</dd>` : ''}
             ${e?.players?.some((p) => p.bench) ? `<dt>Left on bench</dt><dd>${plural(benchPts, 'pt')}</dd>` : ''}
           </dl>
-          ${squad.length ? `<details class="squad"><summary>Show full squad</summary><ul class="squad-list">${squad.map((p) =>
+          ${squad.length && !e?.partial ? `<details class="squad"><summary>Show full squad</summary><ul class="squad-list">${squad.map((p) =>
             `<li class="${p.bench ? 'bench' : ''}"><span>${esc(p.name)}${p.captain ? '<span class="cap" title="Captain">C</span>' : ''}</span><span>${p.points}</span></li>`).join('')}</ul></details>` : ''}
         </li>`;
       }).join('')}</ul>`;
@@ -200,6 +203,7 @@
     }
     ({ table: renderTable, matchday: renderMatchday, season: renderSeason, rivals: renderRivals })[state.tab]();
     animateIn();
+    tickCountdowns();
   }
 
   // ---------- Motion ----------
@@ -227,7 +231,7 @@
   function animateIn() {
     moveTabInk();
     view.classList.remove('view-swap'); void view.offsetWidth; view.classList.add('view-swap');
-    const items = view.querySelectorAll('h2, .note, .standings tbody tr, .winner, .recap-btn, .mgr, .chart-box, .award, .empty, .h2h-pick, .h2h-score, .h2h-gap, .wk, .fx');
+    const items = view.querySelectorAll('h2, .note, .standings tbody tr, .winner, .recap-btn, .mgr, .chart-box, .award, .empty, .h2h-pick, .h2h-score, .h2h-gap, .wk, .fx, .countdown');
     items.forEach((el, i) => { el.classList.add('reveal'); el.style.setProperty('--i', Math.min(i, 12)); });
     view.querySelectorAll('[data-count]').forEach(countUp);
   }
@@ -304,14 +308,21 @@
       ${(() => { const g = grudgeTable(lastMd()).find((r) => r.id === id); return managers.length > 1 && g ? `<p class="sheet-sub">Grudge league: ${ordinal(g.rank)}, won ${g.w}, drew ${g.d}, lost ${g.l}</p>` : ''; })()}
       <h2 id="sheet-title" class="sheet-title">${esc(m.name)}</h2>
       ${m.teamName ? `<p class="sheet-team">${esc(m.teamName)}</p>` : ''}
+      ${(() => {
+        const bits = [];
+        if (m.worldRank) bits.push(`<span class="chip-stat"><b>${m.worldRank.toLocaleString()}</b> worldwide</span>`);
+        if (m.chips?.wildcard) bits.push(`<span class="chip-stat">Wildcard used MD ${m.chips.wildcard}</span>`);
+        if (m.chips?.limitless) bits.push(`<span class="chip-stat">Limitless used MD ${m.chips.limitless}</span>`);
+        return bits.length ? `<p class="chip-row">${bits.join('')}</p>` : '';
+      })()}
       <div class="cabinet">
         <div class="award"><p class="what">Matchday wins</p><p class="who" data-count="${st.wins}">${st.wins}</p></div>
         <div class="award"><p class="what">Best matchday</p><p class="who">${st.best ? st.best.pts : 0}</p><p class="detail">${st.best ? `Matchday ${st.best.md}` : ''}</p></div>
         <div class="award"><p class="what">Best player owned</p><p class="who small">${st.star ? esc(st.star.name) : 'None yet'}</p><p class="detail">${st.star ? `${st.star.points} pts on matchday ${st.star.md}` : ''}</p></div>
-        <div class="award"><p class="what">Captain points</p><p class="who" data-count="${st.capPts}">${st.capPts}</p><p class="detail">${plural(st.benchPts, 'pt')} left on the bench</p></div>
+        <div class="award"><p class="what">Captain points</p><p class="who" data-count="${st.capPts}">${st.capPts}</p>${m.history.some((h) => h.players?.some((pl) => pl.bench)) ? `<p class="detail">${plural(st.benchPts, 'pt')} left on the bench</p>` : ''}</div>
       </div>
       <h3 class="sheet-h">Form</h3>
-      <p class="form-row">${form}<span class="form-key">Filled means above the group average, last ${Math.min(5, matchdays.length)} matchdays</span></p>
+      <p class="form-row">${form}<span class="form-key">Filled means above the group average, ${Math.min(5, matchdays.length) === 1 ? 'latest matchday' : `last ${Math.min(5, matchdays.length)} matchdays`}</span></p>
       <h3 class="sheet-h">Points by matchday</h3>
       <div class="chart-box"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Points by matchday for ${esc(m.name)}">${bars}</svg></div>
       ${managers.length > 1 ? `<button class="pill-btn" data-compare="${esc(m.id)}">Compare head-to-head</button>` : ''}`);
@@ -576,6 +587,95 @@
     });
   }
 
+  // ---------- Countdown ----------
+  function fmtCountdown(ms) {
+    if (ms <= 0) return null;
+    const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const p = (n) => String(n).padStart(2, '0');
+    return d > 0 ? `${d}d ${p(h)}h ${p(m)}m ${p(sec)}s` : `${p(h)}h ${p(m)}m ${p(sec)}s`;
+  }
+  function fmtShort(ms) {
+    const s = Math.floor(ms / 1000), d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+  const whenLabel = (iso) => new Date(iso).toLocaleString('en-US', { timeZone: DISPLAY_TZ, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+  function deadlineCard() {
+    const nd = state.data?.nextDeadline;
+    if (!nd?.deadline) return '';
+    const sameTime = nd.kickoff && Math.abs(new Date(nd.kickoff) - new Date(nd.deadline)) < 60000;
+    return `<section class="countdown" aria-label="Next deadline">
+      <div class="cd-head"><span>${nd.md ? `Matchday ${nd.md} team deadline` : 'Next team deadline'}</span><span class="cd-when">${whenLabel(nd.deadline)}</span></div>
+      <div class="cd-time" data-countdown="${nd.deadline}" aria-live="off">${fmtCountdown(new Date(nd.deadline) - Date.now()) || 'Teams are locked'}</div>
+      ${nd.kickoff && !sameTime ? `<p class="cd-sub">First kickoff ${whenLabel(nd.kickoff)}</p>` : sameTime ? '<p class="cd-sub">Locks at the first kickoff</p>' : ''}
+    </section>`;
+  }
+  function tickCountdowns() {
+    document.querySelectorAll('[data-countdown]').forEach((el) => {
+      el.textContent = fmtCountdown(new Date(el.dataset.countdown) - Date.now()) || 'Teams are locked';
+    });
+    const nd = state.data?.nextDeadline, mini = $('#deadline-mini');
+    if (!mini) return;
+    const left = nd?.deadline ? new Date(nd.deadline) - Date.now() : 0;
+    mini.hidden = !(left > 0);
+    if (left > 0) mini.textContent = `${nd.md ? `MD ${nd.md} deadline` : 'Deadline'} in ${fmtShort(left)}`;
+    mini.classList.toggle('urgent', left > 0 && left < 3 * 3600 * 1000);
+  }
+  setInterval(tickCountdowns, 1000);
+
+  // ---------- Pull to refresh ----------
+  const ptr = document.createElement('div');
+  ptr.className = 'ptr';
+  ptr.setAttribute('aria-hidden', 'true');
+  ptr.innerHTML = `<div class="ptr-inner">
+      <svg class="ptr-ring" viewBox="0 0 36 36"><circle cx="18" cy="18" r="14" class="ptr-track"/><circle cx="18" cy="18" r="14" class="ptr-arc" pathLength="1"/>
+        <path class="ptr-check" d="M12 18.5l4 4 8-9" pathLength="1"/></svg>
+      <span class="ptr-label">Pull to refresh</span></div>`;
+  document.querySelector('.top').after(ptr);
+  const PULL_MAX = 130, PULL_TRIGGER = 72;
+  let startY = null, pull = 0, refreshing = false;
+  const movers = () => document.querySelectorAll('#banner, #view');
+  function setPull(px, settle) {
+    pull = px;
+    ptr.classList.toggle('settle', !!settle);
+    movers().forEach((el) => { el.classList.toggle('ptr-settle', !!settle); el.style.transform = px ? `translateY(${px}px)` : ''; });
+    ptr.style.top = `${document.querySelector('.top').getBoundingClientRect().bottom}px`;
+    ptr.style.height = `${px}px`;
+    ptr.style.setProperty('--p', Math.min(1, px / PULL_TRIGGER));
+    if (!refreshing) {
+      ptr.classList.toggle('ready', px >= PULL_TRIGGER);
+      ptr.querySelector('.ptr-label').textContent = px >= PULL_TRIGGER ? 'Release to refresh' : 'Pull to refresh';
+    }
+  }
+  window.addEventListener('touchstart', (e) => {
+    startY = (!refreshing && window.scrollY <= 0 && sheet.hidden && !e.target.closest('.md-picker, .pv-panel, select')) ? e.touches[0].clientY : null;
+  }, { passive: true });
+  window.addEventListener('touchmove', (e) => {
+    if (startY === null) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || window.scrollY > 0) { if (pull) setPull(0); return; }
+    if (e.cancelable) e.preventDefault();
+    setPull(Math.min(PULL_MAX, dy * 0.5));
+  }, { passive: false });
+  window.addEventListener('touchend', async () => {
+    if (startY === null) return;
+    startY = null;
+    if (pull < PULL_TRIGGER) { setPull(0, true); return; }
+    refreshing = true;
+    ptr.classList.add('spinning'); ptr.classList.remove('ready', 'done');
+    ptr.querySelector('.ptr-label').textContent = 'Refreshing';
+    setPull(64, true);
+    const started = Date.now();
+    await load();
+    await new Promise((r) => setTimeout(r, Math.max(0, 700 - (Date.now() - started))));
+    ptr.classList.remove('spinning'); ptr.classList.add('done');
+    ptr.querySelector('.ptr-label').textContent = 'Up to date';
+    await new Promise((r) => setTimeout(r, 650));
+    refreshing = false;
+    setPull(0, true);
+    setTimeout(() => ptr.classList.remove('done'), 400);
+  });
+
   // ---------- Data ----------
   async function load() {
     const btn = $('#refresh'); btn.classList.add('spin');
@@ -587,7 +687,7 @@
       if (!data.matchdays.includes(state.md)) state.md = data.matchdays[data.matchdays.length - 1] ?? null;
       $('#league-name').textContent = data.leagueName;
       document.title = data.leagueName;
-      $('#updated').textContent = `Updated ${new Date(data.updatedAt).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
+      $('#updated').textContent = `Updated ${new Date(data.updatedAt).toLocaleString('en-US', { timeZone: DISPLAY_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`;
       const banner = $('#banner');
       banner.hidden = data.mode !== 'demo';
       banner.textContent = 'You’re looking at demo data. Add your team IDs and data URL to see your real group (see the README).';
