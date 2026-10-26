@@ -52,6 +52,9 @@ If you'd rather not use the league URL, list every person's name, team name and 
 |---|---|
 | `UEFA_TEAM_URL` | The URL template from above, with `{teamId}` and `{md}` |
 | `UEFA_LEAGUE_URL` | Your league standings URL from above (recommended) |
+| `UEFA_SCHEDULE_URL` | Optional. The request containing `"deadline"` (the player list info feed, message `cl_admin_player_recommended_list_info_get`), used for the deadline countdown |
+| `UEFA_DEADLINE_TZ` | Optional. Timezone of the game's deadline times. Defaults to `Europe/Paris` (Central European Time); set to `UTC` if the countdown is an hour off |
+| `NEXT_DEADLINE` | Optional fallback if you don't have the schedule URL, e.g. `2026-11-04T17:45:00Z`. Update it each matchday. |
 | `UEFA_COOKIE` | Only if the request fails without being logged in. In DevTools, open the request, go to **Headers → Request Headers**, and copy the whole `cookie` value. This is your login session, so keep it private and never commit it to GitHub. It expires periodically, so update it if scores stop loading. |
 | `MAX_MATCHDAY` | Optional. Highest matchday to check (default 17). |
 | `DEBUG_KEY` | Optional. Any password, used for the debug page below. |
@@ -66,7 +69,7 @@ to see exactly what the game returns for one team, or
 
 `https://YOUR-APP.vercel.app/api/debug?key=YOUR_DEBUG_KEY&league=1`
 
-for your league standings. Then adjust the field name lists at the top of `api/_lib.js` (`KEYS.points`, `KEYS.name`, `KEYS.rank`, and so on). That file is the only place that knows about the game's format. You can also paste the debug output to Claude and ask it to update the mapping.
+for your league standings. Use `&schedule=1` to check the matchday schedule. Then adjust the field name lists at the top of `api/_lib.js` (`KEYS.points`, `KEYS.name`, `KEYS.rank`, and so on). That file is the only place that knows about the game's format. You can also paste the debug output to Claude and ask it to update the mapping.
 
 ## 4. Share it
 

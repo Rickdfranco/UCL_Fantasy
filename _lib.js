@@ -7,11 +7,16 @@ const config = require('../league.config.json');
 const TEAM_URL = process.env.UEFA_TEAM_URL || '';      // template with {teamId} and {md}
 const COOKIE = process.env.UEFA_COOKIE || '';          // optional, your logged-in session cookie
 const LEAGUE_URL = process.env.UEFA_LEAGUE_URL || '';  // optional: your private league's standings
+const SCHEDULE_URL = process.env.UEFA_SCHEDULE_URL || ''; // optional: matchdays with deadlines
+const MANUAL_DEADLINE = process.env.NEXT_DEADLINE || '';  // optional fallback, e.g. 2026-11-04T17:45:00Z
+// The game writes deadlines like "11/03/2026 18:45:00" with no timezone; they follow Central European Time.
+const DEADLINE_TZ = process.env.UEFA_DEADLINE_TZ || 'Europe/Paris';
 const MAX_MD = parseInt(process.env.MAX_MATCHDAY || '17', 10);
 
 const configFilledIn = () => !config.managers.some((m) => String(m.teamId).startsWith('PASTE_'));
 // Live mode needs the team URL plus either the league URL or a filled-in config file.
-const isDemo = () => !TEAM_URL || (!LEAGUE_URL && !configFilledIn());
+// Live mode needs the league URL, or the team URL plus a filled-in config file.
+const isDemo = () => !LEAGUE_URL && (!TEAM_URL || !configFilledIn());
 
 function buildUrl(teamId, md) {
   return TEAM_URL.replace(/\{teamId\}/g, encodeURIComponent(teamId)).replace(/\{md\}/g, md);
@@ -26,7 +31,12 @@ async function getJson(url, what) {
 }
 
 const fetchRaw = (teamId, md) => getJson(buildUrl(teamId, md), `team ${teamId}, matchday ${md}`);
-const fetchLeagueRaw = () => getJson(LEAGUE_URL, 'the league standings');
+// The game adds a random "buster" value to stop caching; we set a fresh one each time.
+function withBuster(url) {
+  try { const u = new URL(url); u.searchParams.set('buster', Date.now().toString(36)); return u.toString(); }
+  catch { return url; }
+}
+const fetchLeagueRaw = () => getJson(withBuster(LEAGUE_URL), 'the league standings');
 
 // ---------- Normalizing ----------
 // The game's JSON uses short field names that change between seasons, so we look for
@@ -102,19 +112,28 @@ async function getMembers() {
   if (!rows.length) throw new Error('No members found in the league standings. Check UEFA_LEAGUE_URL with /api/debug?league=1');
   // Names in league.config.json (matched by team ID) override what the game shows, if you prefer nicknames.
   const nick = new Map(config.managers.map((m) => [String(m.teamId), m]));
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== '' ? n : null; };
   const members = rows.map((r) => {
     const teamId = String(pick(r, KEYS.memberId));
     const o = nick.get(teamId);
-    const rank = Number(pick(r, KEYS.rank));
-    const total = Number(pick(r, KEYS.overall));
     return {
       teamId,
-      name: o?.name || String(pick(r, KEYS.memberName) ?? 'Manager'),
-      teamName: o?.teamName || String(pick(r, KEYS.memberTeam) ?? ''),
-      official: { rank: Number.isFinite(rank) ? rank : null, total: Number.isFinite(total) ? total : null },
+      name: (o?.name || String(pick(r, KEYS.memberName) ?? 'Manager')).trim(),
+      teamName: (o?.teamName || String(pick(r, KEYS.memberTeam) ?? '')).trim(),
+      official: { rank: num(pick(r, KEYS.rank)), total: num(pick(r, KEYS.overall)) },
+      // Extras from the standings feed (field names as of the 2026/27 game)
+      worldRank: num(r.overAllRank),
+      mdPoints: num(r.currentGamedayPoints),
+      topPerformer: r.topPerformerId ? { id: String(r.topPerformerId), name: String(r.topPerformer || '').trim(), points: num(r.topPerformerValue) ?? 0 } : null,
+      captainId: r.mdCaptain ? String(r.mdCaptain) : null,
+      playerIds: Array.isArray(r.userPlayers) ? r.userPlayers.map(String) : [],
+      transfers: num(r.mdTransfers),
+      trend: ({ 2: 'up', 3: 'down', 1: 'same' })[String(r.trend)] || null, // game's own movement arrow
+      chips: { wildcard: num(r.wildCardMD) || null, limitless: num(r.limitlessMD) || null },
     };
   });
-  return { leagueName: findValue(raw, KEYS.leagueName) || config.leagueName, members };
+  const latestMd = num(raw?.data?.value?.lp_gamedayId) || num(findValue(raw, ['lp_gamedayId', 'gamedayId']));
+  return { leagueName: findValue(raw, KEYS.leagueName) || config.leagueName, members, latestMd };
 }
 
 function truthy(v) { return v === true || v === 1 || v === '1' || v === 'true'; }
@@ -135,21 +154,113 @@ function normalizeMatchday(raw) {
   return { points: Number.isFinite(reported) && reported > 0 ? reported : computed, players };
 }
 
+
+// ---------- Deadlines ----------
+// Generic finder: first array of objects that has a key from each list.
+function findArrayWith(node, listA, listB, depth = 0) {
+  if (!node || depth > 7) return null;
+  if (Array.isArray(node)) {
+    if (node.length && typeof node[0] === 'object' && pick(node[0], listA) !== undefined && pick(node[0], listB) !== undefined) return node;
+    for (const item of node) { const f = findArrayWith(item, listA, listB, depth + 1); if (f) return f; }
+    return null;
+  }
+  if (typeof node === 'object') {
+    for (const v of Object.values(node)) { const f = findArrayWith(v, listA, listB, depth + 1); if (f) return f; }
+  }
+  return null;
+}
+
+const SKEYS = {
+  md: ['matchdayId', 'mdId', 'gdNo', 'gdId', 'gamedayId', 'id'],
+  deadline: ['deadline', 'deadlineDate', 'gdDeadline', 'lockTime', 'deadlineTime', 'deadLine'],
+  kickoff: ['firstMatchDate', 'firstKickoff', 'kickoff', 'startDate', 'startTime', 'matchDate'],
+};
+
+// Milliseconds a timezone is ahead of UTC at a given moment.
+function tzOffset(ts, tz) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(ts).map((p) => [p.type, p.value]));
+  return Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - ts;
+}
+
+function parseDate(v) {
+  if (!v) return null;
+  // "MM/DD/YYYY HH:mm:ss" in the game's timezone
+  const m = typeof v === 'string' && v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const guess = Date.UTC(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +(m[6] || 0));
+    let ts = guess;
+    try {
+      const tz = DEADLINE_TZ.toUpperCase() === 'UTC' ? 'UTC' : DEADLINE_TZ;
+      ts = guess - tzOffset(guess, tz);
+      ts = guess - tzOffset(ts, tz); // settle around daylight-saving changes
+    } catch { /* unknown timezone name: treat as UTC */ }
+    return new Date(ts).toISOString();
+  }
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+async function loadDeadline() {
+  if (MANUAL_DEADLINE) { const d = parseDate(MANUAL_DEADLINE); if (d && new Date(d) > Date.now()) return { md: null, deadline: d, kickoff: null }; }
+  if (!SCHEDULE_URL) return null;
+  const raw = await getJson(withBuster(SCHEDULE_URL), 'the matchday schedule');
+  const now = Date.now();
+  const toEntry = (g) => ({ md: Number(pick(g, SKEYS.md)) || null, deadline: parseDate(pick(g, SKEYS.deadline)), kickoff: parseDate(pick(g, SKEYS.kickoff)) });
+  // Single upcoming matchday (the game's player-list info feed), or a list of matchdays
+  const single = raw?.data?.value && pick(raw.data.value, SKEYS.deadline) !== undefined ? [toEntry(raw.data.value)] : [];
+  const list = (findArrayWith(raw, SKEYS.md, SKEYS.deadline) || []).map(toEntry);
+  return [...single, ...list]
+    .filter((g) => g.deadline && new Date(g.deadline).getTime() > now)
+    .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))[0] || null;
+}
+
+async function loadExtras() {
+  const safe = (p) => p.catch(() => null);
+  return { nextDeadline: await safe(loadDeadline()) };
+}
+
+const extrasOf = (m) => ({ worldRank: m.worldRank ?? null, transfers: m.transfers ?? null, chips: m.chips || null, trend: m.trend || null, playerIds: m.playerIds || [] });
+
+// With only the league URL: official table plus the latest matchday, built from each
+// member's top performer, captain and starting player IDs.
+function leagueOnly(leagueName, members, latestMd) {
+  const md = latestMd || 1;
+  const performers = new Map();
+  members.forEach((m) => { if (m.topPerformer && m.topPerformer.name) performers.set(m.topPerformer.id, m.topPerformer); });
+  const managers = members.map((m) => ({
+    id: m.teamId, name: m.name, teamName: m.teamName, official: m.official, ...extrasOf(m),
+    history: [{
+      md, partial: true,
+      points: m.mdPoints ?? 0,
+      players: [...performers.values()].filter((p) => m.playerIds.includes(p.id) || m.topPerformer?.id === p.id)
+        // Their own top performer first, so ties go to the game's pick
+        .sort((a, b) => (b.id === m.topPerformer?.id) - (a.id === m.topPerformer?.id))
+        .map((p) => ({ name: p.name, club: '', points: p.points, captain: p.id === m.captainId, bench: false })),
+    }],
+  }));
+  return { mode: 'live', source: 'league-only', leagueName, updatedAt: new Date().toISOString(), matchdays: [md], managers };
+}
+
 async function loadLive() {
-  const { leagueName, members } = await getMembers();
+  const { leagueName, members, latestMd } = await getMembers();
+  const extras = await loadExtras();
+  if (!TEAM_URL) return { ...leagueOnly(leagueName, members, latestMd), ...extras };
   const managers = await Promise.all(members.map(async (m) => {
     const mds = Array.from({ length: MAX_MD }, (_, i) => i + 1);
     const results = await Promise.all(mds.map(async (md) => {
       try { return { md, ...normalizeMatchday(await fetchRaw(m.teamId, md)) }; }
       catch { return null; }
     }));
-    return { id: String(m.teamId), name: m.name, teamName: m.teamName || '', official: m.official, history: results.filter(Boolean) };
+    return { id: String(m.teamId), name: m.name, teamName: m.teamName || '', official: m.official, ...extrasOf(m), history: results.filter(Boolean) };
   }));
   // Keep only matchdays where someone actually scored.
   const played = new Set();
   managers.forEach((m) => m.history.forEach((h) => { if (h.points !== 0) played.add(h.md); }));
   managers.forEach((m) => { m.history = m.history.filter((h) => played.has(h.md)); });
   return {
+    ...extras,
     mode: 'live',
     source: LEAGUE_URL ? 'league' : 'config',
     leagueName,
@@ -188,7 +299,9 @@ function loadDemo() {
       return { md, points, players };
     }),
   }));
-  return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, managers };
+  const now = Date.now();
+  const nextDeadline = { md: 7, deadline: new Date(now + ((2 * 24 + 5) * 60 + 12) * 60000).toISOString(), kickoff: new Date(now + ((2 * 24 + 5) * 60 + 12) * 60000).toISOString() };
+  return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, managers, nextDeadline };
 }
 
-module.exports = { isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
+module.exports = { loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };

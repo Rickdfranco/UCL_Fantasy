@@ -305,6 +305,48 @@ details.squad[open] summary::before { transform: rotate(45deg); }
 .grudge th:nth-child(n+3), .grudge td:nth-child(n+3) { width: 2.4em; padding-left: 4px; padding-right: 10px; }
 .grudge .total { padding-right: 14px; }
 
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
+.chip-stat { font-family: var(--mono); font-size: 0.76rem; color: var(--silver); border: 1px solid #3A3A43; border-radius: 999px; padding: 3px 10px; }
+.chip-stat b { color: var(--cream); font-weight: 600; }
+
+
+/* Countdown */
+.deadline-mini { margin-top: 2px; color: var(--cream); font-family: var(--mono); font-size: 0.78rem; }
+.deadline-mini.urgent { color: var(--down); }
+.countdown {
+  position: relative; overflow: hidden; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px 14px;
+  background: radial-gradient(120% 140% at 100% 0%, rgba(61,107,242,0.28), transparent 55%), linear-gradient(180deg, #16161C, var(--surface));
+}
+.countdown::after { content: ""; position: absolute; left: 18px; right: 18px; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--silver), transparent); opacity: .45; }
+.cd-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 0.86rem; color: var(--silver); }
+.cd-when { font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
+.cd-time { margin-top: 6px; font-size: clamp(1.9rem, 8.5vw, 2.6rem); font-weight: 650; letter-spacing: -0.04em; color: var(--cream); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.cd-sub { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
+
+/* Pull to refresh */
+html, body { overscroll-behavior-y: contain; }
+.ptr { position: fixed; left: 0; right: 0; height: 0; z-index: 4; overflow: hidden; pointer-events: none;
+  background: linear-gradient(180deg, #09090B 0%, #2A251C 45%, color-mix(in srgb, var(--cream) calc(var(--p, 0) * 85%), #09090B) 100%);
+  display: flex; align-items: flex-end; justify-content: center; }
+.ptr::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--cream), transparent); opacity: calc(var(--p, 0) * .9); }
+.ptr-inner { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex: none; opacity: var(--p, 0); transform: scale(calc(.85 + var(--p, 0) * .15)); }
+.ptr-ring { width: 26px; height: 26px; transform: rotate(-90deg); }
+.ptr-track { fill: none; stroke: rgba(9,9,11,0.35); stroke-width: 3; }
+.ptr-arc { fill: none; stroke: #0A0A0C; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: calc(1 - var(--p, 0)); }
+.ptr-check { fill: none; stroke: #0A0A0C; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; transform: rotate(90deg); transform-origin: 18px 18px; }
+.ptr-label { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: #0A0A0C; }
+.ptr.ready .ptr-inner { transform: scale(1.04); }
+.ptr.spinning .ptr-ring { animation: ptr-spin .8s linear infinite; }
+.ptr.spinning .ptr-arc { stroke-dashoffset: .7; }
+.ptr.done .ptr-arc { stroke-dashoffset: 0; }
+.ptr.done .ptr-check { stroke-dashoffset: 0; transition: stroke-dashoffset .35s var(--ease); }
+@keyframes ptr-spin { to { transform: rotate(270deg); } }
+.ptr.settle { transition: height .4s var(--ease); }
+.ptr-settle { transition: transform .4s var(--ease); }
+/* Swipe replaces the button on touch screens; mouse users keep the button */
+@media (hover: none) and (pointer: coarse) { #refresh { display: none; } }
+
 /* ---------- Motion (only for people who haven't asked to reduce it) ---------- */
 @media (prefers-reduced-motion: no-preference) {
   .reveal { opacity: 0; transform: translateY(10px); animation: rise .55s var(--ease) forwards; animation-delay: calc(var(--i, 0) * 55ms); }
