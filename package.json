@@ -1,0 +1,8 @@
+{
+  "name": "ucl-fantasy-group",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A shared scoreboard PWA for a Champions League fantasy group",
+  "engines": { "node": ">=18" },
+  "scripts": { "dev": "vercel dev" }
+}
