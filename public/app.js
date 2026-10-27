@@ -117,7 +117,7 @@
             if (d < 0) move = `<span class="move down" aria-label="down ${-d}">▼${-d}</span>`;
           }
           const spoon = r.rank === lastRank && rows.length > 2 ? '<span class="spoon" title="Bottom of the table"></span>' : '';
-          return `<tr class="${r.rank === 1 ? 'leader' : ''}">
+          return `<tr class="tap-card${r.rank === 1 ? ' leader' : ''}" data-profile="${esc(r.m.id)}">
             <td class="pos">${r.rank}<br>${move}</td>
             <td class="who"><strong>${nameBtn(r.m)}${spoon}</strong><span>${esc(r.m.teamName)}</span></td>
             <td class="num">${r.today}</td>
@@ -157,7 +157,7 @@
         const cap = xi.find((p) => p.captain);
         const benchPts = (e?.players || []).filter((p) => p.bench).reduce((s, p) => s + p.points, 0);
         const squad = (e?.players || []).slice().sort((a, b) => (a.bench - b.bench) || (b.points - a.points));
-        return `<li class="mgr">
+        return `<li class="mgr tap-card" data-profile="${esc(m.id)}">
           <div class="mgr-head"><strong>${nameBtn(m)}</strong><span class="big" data-count="${e?.points ?? 0}">${e?.points ?? 0}</span></div>
           <dl class="facts">
             ${mvp ? `<dt>Top scorer</dt><dd>${esc(mvp.name)}, ${mvp.points}</dd>` : ''}
@@ -212,6 +212,31 @@
     const topPlayer = [...playerTotals.values()].map((p) => ({ ...p, total: [...p.byMd.values()].reduce((s, v) => s + v, 0) }))
       .sort((a, b) => b.total - a.total)[0];
 
+    // Superlatives: only matchdays each manager actually has scores for
+    const played = (m) => m.history.filter((h) => matchdays.includes(h.md)).sort((a, b) => a.md - b.md);
+    let worstDay = null, biggestDrop = null;
+    managers.forEach((m) => played(m).forEach((h, i, arr) => {
+      if (!worstDay || h.points < worstDay.pts) worstDay = { name: m.name, pts: h.points, md: h.md };
+      const prev = arr[i - 1];
+      if (prev && prev.md === h.md - 1 && prev.points - h.points > (biggestDrop?.drop ?? 0)) {
+        biggestDrop = { name: m.name, drop: prev.points - h.points, from: prev.points, to: h.points, md: h.md };
+      }
+    }));
+    const swings = managers.map((m) => {
+      const pts = played(m).map((h) => h.points);
+      const mean = pts.reduce((s, v) => s + v, 0) / (pts.length || 1);
+      return { name: m.name, sd: Math.sqrt(pts.reduce((s, v) => s + (v - mean) ** 2, 0) / (pts.length || 1)), lo: Math.min(...pts), hi: Math.max(...pts), n: pts.length };
+    }).filter((x) => x.n >= 3).sort((a, b) => b.sd - a.sd);
+    const caps = managers.map((m) => {
+      const list = matchdays.map((md) => entry(m, md)).filter((e) => e && !e.partial).map((e) => starters(e).find((p) => p.captain)).filter(Boolean);
+      return { name: m.name, n: list.length, pts: list.reduce((s, p) => s + p.points * 2, 0) };
+    }).filter((x) => x.n).sort((a, b) => a.pts / a.n - b.pts / b.n);
+    const bottoms = managers.map((m) => ({ name: m.name, n: matchdays.filter((md) => {
+      const rows = ranking(md); return rows.find((r) => r.m.id === m.id).rank === rows[rows.length - 1].rank;
+    }).length })).sort((a, b) => b.n - a.n);
+    const flop = caps[0], wild = swings[0], vanilla = swings[swings.length - 1], bottom = bottoms[0];
+    const award = (what, who, detail) => `<div class="award"><p class="what">${what}</p><p class="who">${esc(who)}</p><p class="detail">${detail}</p></div>`;
+
     view.innerHTML = `
       <h2>Points behind the leader</h2>
       <div class="chart-box">${svg}
@@ -220,9 +245,18 @@
       <h2>Season awards</h2>
       <div class="awards">
         <div class="award"><p class="what">Biggest PP 🍆 - Most matchday wins</p><p class="who">${esc(topWins[0])}</p><p class="detail">${plural(topWins[1], 'win')}</p></div>
-        <div class="award"><p class="what">Best single matchday</p><p class="who">${esc(bestDay.name)}</p><p class="detail">${bestDay.pts} pts on matchday ${bestDay.md}</p></div>
         ${topPlayer ? `<div class="award"><p class="what">Top player owned by the group</p><p class="who">${esc(topPlayer.name)}</p><p class="detail">${topPlayer.total} pts in matchdays someone owned him</p></div>` : ''}
-        ${topBench && topBench[1] > 0 ? `<div class="award"><p class="what">Most points left on the bench</p><p class="who">${esc(topBench[0])}</p><p class="detail">${plural(topBench[1], 'pt')} wasted</p></div>` : ''}
+      </div>
+      <h2>Superlatives</h2>
+      <div class="awards">
+        ${topBench && topBench[1] > 0 ? award('Blue Balls 🥶 - So much left on the bench, never got any action', topBench[0], `${plural(topBench[1], 'pt')} sat there unused`) : ''}
+        ${award('Money Shot 💦 - Best single matchday', bestDay.name, `Let loose for ${bestDay.pts} pts on matchday ${bestDay.md}`)}
+        ${worstDay ? award('Couldn’t Get It Up 🥀 - Worst single matchday', worstDay.name, `Only ${plural(worstDay.pts, 'pt')} on matchday ${worstDay.md}. It happens to everyone`) : ''}
+        ${flop ? award('Limp Armband 🫠 - Worst captain picks', flop.name, `Captains averaged ${Math.round(flop.pts / flop.n)} pts (doubled!)`) : ''}
+        ${biggestDrop ? award('Finished Too Early 💨 - Biggest drop-off', biggestDrop.name, `Went from ${biggestDrop.from} to ${biggestDrop.to} on matchday ${biggestDrop.md}`) : ''}
+        ${wild ? award('Freak in the Sheets 🌶️ - Wildest swings', wild.name, `Anywhere from ${wild.lo} to ${wild.hi} pts. Nobody knows what you’ll do next`) : ''}
+        ${vanilla && vanilla !== wild ? award('Strictly Missionary 🛏️ - Most predictable scores', vanilla.name, `Never below ${vanilla.lo}, never above ${vanilla.hi}. Safe, steady, boring`) : ''}
+        ${bottom && bottom.n > 0 ? award('Loves Being on the Bottom 🍑 - Most matchdays in last place', bottom.name, `Last after ${plural(bottom.n, 'matchday')}`) : ''}
       </div>`;
   }
 
@@ -746,7 +780,8 @@
   });
   $('#refresh').addEventListener('click', load);
   document.addEventListener('click', (e) => {
-    const prof = e.target.closest('[data-profile]');
+    // The squad dropdown inside a card toggles on its own instead of opening the profile
+    const prof = !e.target.closest('details.squad') && e.target.closest('[data-profile]');
     if (prof) { openProfile(prof.dataset.profile); return; }
     const cmp = e.target.closest('[data-compare]');
     if (cmp) {

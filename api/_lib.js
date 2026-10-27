@@ -131,13 +131,17 @@ function findValue(node, keys, depth = 0) {
 // Who is in the group: from the league standings if available, otherwise from league.config.json.
 // Turns a league standings response into members. Works for the overall feed and for a
 // single-matchday feed (where pointsGamedayId names the matchday and gamedayPoints holds its scores).
-function mapMembers(raw) {
+// mdHint: the matchday a pasted past-matchday feed is for, since the game sometimes reports it as 0
+function mapMembers(raw, mdHint) {
   const rows = findMemberArray(raw) || [];
   if (!rows.length) throw new Error('No members found in the league standings.');
   const nick = new Map(config.managers.map((m) => [String(m.teamId), m]));
   const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== '' && v !== null ? n : null; };
   const value = raw?.data?.value || {};
-  const mdSpecific = (num(value.pointsGamedayId) || 0) > 0;
+  // A past matchday's standings: either the game says which one, or the season totals are blank
+  // while the matchday points are filled in
+  const blankTotals = rows.every((r) => r.overallPoints === '' && r.gamedayPoints !== '' && r.gamedayPoints != null);
+  const mdSpecific = (num(value.pointsGamedayId) || 0) > 0 || blankTotals;
   const members = rows.map((r) => {
     const teamId = String(pick(r, KEYS.memberId));
     const o = nick.get(teamId);
@@ -157,7 +161,7 @@ function mapMembers(raw) {
       chips: { wildcard: num(r.wildCardMD) || null, limitless: num(r.limitlessMD) || null },
     };
   });
-  const latestMd = mdSpecific ? num(value.pointsGamedayId)
+  const latestMd = mdSpecific ? (num(value.pointsGamedayId) || num(mdHint))
     : num(value.lp_gamedayId) || num(findValue(raw, ['lp_gamedayId', 'gamedayId']));
   return { leagueName: findValue(raw, KEYS.leagueName) || config.leagueName, members, latestMd, mdSpecific };
 }

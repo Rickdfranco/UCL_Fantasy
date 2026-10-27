@@ -163,6 +163,9 @@ h2:first-child { margin-top: 4px; }
 .mgr-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .mgr { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; transition: border-color .3s; }
 .mgr:hover { border-color: #34343D; }
+.tap-card { cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color .3s, background-color .15s, transform .15s var(--ease); }
+.mgr.tap-card:active { transform: scale(0.985); }
+.standings tr.tap-card:hover, .standings tr.tap-card:active { background: #1A1A20; }
 .mgr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .mgr-head strong { font-size: 1.05rem; font-weight: 650; }
 .mgr-head .big { font-family: var(--serif); font-weight: 600; font-size: 1.6rem; font-variant-numeric: tabular-nums; }
