@@ -27,7 +27,7 @@ const notify = (msg) => { try { osa(['on run argv', 'display notification (item 
 // Runs a same-origin request inside the first gaming.uefa.com tab, so Safari sends its own login cookies.
 // Never launches Safari: if it isn't open, the run is skipped.
 function fetchViaSafari(url) {
-  const js = `(function(){try{var x=new XMLHttpRequest();x.open('GET',${JSON.stringify(url)}+'&buster='+Date.now(),false);x.send();return x.responseText;}catch(e){return 'ERR:'+e.message;}})()`;
+  const js = `(function(){try{var u=${JSON.stringify(url)},x=new XMLHttpRequest();x.open('GET',u+(u.indexOf('?')<0?'?':'&')+'buster='+Date.now(),false);x.send();return x.responseText;}catch(e){return 'ERR:'+e.message;}})()`;
   return osa([
     'on run argv',
     'if application "Safari" is not running then return "SKIP:Safari isn’t open"',
@@ -45,10 +45,22 @@ function fetchViaSafari(url) {
   ], js);
 }
 
-function save(league) {
+// The deadline feed powers the countdown. It's optional, so a failure here never blocks the standings.
+function fetchDeadlineFeed() {
+  const url = process.env.UEFA_SCHEDULE_URL;
+  if (!url) return null;
+  try {
+    const text = fetchViaSafari(url);
+    const json = JSON.parse(text);
+    if (json.meta?.success === false) throw new Error(json.meta.message);
+    return { text, json };
+  } catch (e) { log(`Deadline feed skipped: ${e.message}`); return null; }
+}
+
+function save(league, info) {
   return new Promise((resolve) => {
     const res = { setHeader() {}, status(code) { this.code = code; return this; }, json: resolve, end() {} };
-    Promise.resolve(sync({ method: 'POST', body: { key: process.env.SYNC_KEY, league } }, res))
+    Promise.resolve(sync({ method: 'POST', body: { key: process.env.SYNC_KEY, league, info } }, res))
       .catch((e) => resolve({ ok: false, error: e.message }));
   });
 }
@@ -91,17 +103,20 @@ async function run(dry) {
   }
 
   const m = mapMembers(json);
+  const info = fetchDeadlineFeed();
   if (dry) {
     log(`${m.leagueName}: standings through matchday ${m.latestMd} (dry run, nothing saved)`);
     m.members.forEach((x) => console.log(`  ${x.name}: ${x.mdPoints ?? '-'} this matchday, ${x.official?.total ?? '-'} total`));
+    console.log(`  Deadline feed: ${info ? 'fetched' : process.env.UEFA_SCHEDULE_URL ? 'failed (see above)' : 'not set up (UEFA_SCHEDULE_URL)'}`);
     return;
   }
 
   // Skip the write when nothing has changed since the last save
-  const hash = crypto.createHash('sha1').update(JSON.stringify(json.data?.value?.rest || json)).digest('hex');
+  const hash = crypto.createHash('sha1')
+    .update(JSON.stringify([json.data?.value?.rest || json, info?.json.data?.value || null])).digest('hex');
   if (hash === state.hash) { log('No changes.'); report(state, null); writeState(state); return; }
 
-  const out = await save(text);
+  const out = await save(text, info?.text);
   if (out.ok) { log(`Saved. ${out.summary}`); state.hash = hash; report(state, null); }
   else { log(`Save failed: ${out.error}`); report(state, `Save failed: ${out.error}`); process.exitCode = 1; }
   writeState(state);
