@@ -1,7 +1,13 @@
 // Tiny storage layer on Upstash Redis (free, added from Vercel's Storage tab).
 // Uses its REST API with plain fetch, so no packages are needed.
-const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || '';
-const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || '';
+// Finds the settings Vercel adds when you connect the database, even with a custom prefix
+// (e.g. STORAGE_KV_REST_API_URL). Read-only tokens are skipped, since syncing needs to write.
+function findEnv(pattern) {
+  const key = Object.keys(process.env).find((k) => pattern.test(k) && !/READ_ONLY/.test(k) && process.env[k]);
+  return key ? process.env[key] : '';
+}
+const URL_ = findEnv(/(KV_REST_API_URL|REDIS_REST_URL)$/);
+const TOKEN = findEnv(/(KV_REST_API_TOKEN|REDIS_REST_TOKEN)$/);
 const storeEnabled = () => !!(URL_ && TOKEN);
 
 async function cmd(args) {
