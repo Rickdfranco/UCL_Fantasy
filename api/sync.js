@@ -1,9 +1,16 @@
 // POST /api/sync  { key, league, info? }  saves a copy of the league (and optionally the deadline feed)
 // GET  /api/sync  setup status for the Sync page
 const { storeEnabled, setSnapshot, getSnapshot } = require('./_store');
-const { findMemberArray, findValue } = require('./_lib');
+const { findMemberArray, findValue, mapMembers, mdRecord } = require('./_lib');
 
-const parse = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
+// Accepts pasted text with extra bits around the JSON (e.g. browser extension labels
+// that get copied with Ctrl+A) by keeping only the part from the first { to the last }.
+function parse(v) {
+  if (typeof v !== 'string') return v;
+  const start = v.indexOf('{'), end = v.lastIndexOf('}');
+  if (start === -1 || end <= start) throw new Error('No JSON found');
+  return JSON.parse(v.slice(start, end + 1));
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -40,9 +47,20 @@ module.exports = async (req, res) => {
   }
 
   const syncedAt = new Date().toISOString();
-  await setSnapshot('league', { raw: league, syncedAt });
+  const mapped = mapMembers(league);
+  const md = mapped.latestMd;
+
+  // Season history: one entry per matchday, refreshed whenever that matchday is synced again
+  const history = (await getSnapshot('history').catch(() => null)) || { mds: {} };
+  if (md) {
+    history.mds[md] = { members: mapped.members.map(mdRecord), savedAt: syncedAt };
+    await setSnapshot('history', history);
+  }
+  // Only the overall feed replaces the current standings; a single past matchday just fills history
+  if (!mapped.mdSpecific) await setSnapshot('league', { raw: league, syncedAt });
   if (info) await setSnapshot('info', { raw: info, syncedAt });
-  const name = findValue(league, ['leagueName']) || 'League';
-  const md = league?.data?.value?.lp_gamedayId;
-  return res.status(200).json({ ok: true, summary: `${name}: ${members.length} members${md ? `, through matchday ${md}` : ''}${info ? ', deadline updated' : ''}` });
+
+  const saved = Object.keys(history.mds).map(Number).sort((a, b) => a - b);
+  const what = mapped.mdSpecific ? `matchday ${md} added to the history` : `${mapped.leagueName}: ${mapped.members.length} members${md ? `, through matchday ${md}` : ''}`;
+  return res.status(200).json({ ok: true, summary: `${what}${info ? ', deadline updated' : ''}. Matchdays saved: ${saved.join(', ') || 'none'}` });
 };
