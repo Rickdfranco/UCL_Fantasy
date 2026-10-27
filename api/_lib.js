@@ -22,12 +22,37 @@ function buildUrl(teamId, md) {
   return TEAM_URL.replace(/\{teamId\}/g, encodeURIComponent(teamId)).replace(/\{md\}/g, md);
 }
 
+// Look like a normal browser visit from the fantasy site; UEFA's bot protection can refuse anything else.
+const BROWSER_HEADERS = {
+  Accept: 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+  Referer: 'https://gaming.uefa.com/en/uclfantasy/',
+  Origin: 'https://gaming.uefa.com',
+};
+
 async function getJson(url, what) {
-  const headers = { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (fantasy-group-app)' };
+  const headers = { ...BROWSER_HEADERS };
   if (COOKIE) headers.Cookie = COOKIE;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`The game returned ${res.status} for ${what}`);
-  return res.json();
+  let res;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    } catch (err) {
+      if (attempt === 2) {
+        const c = err.cause || {};
+        const why = err.name === 'TimeoutError' ? 'timed out after 8s'
+          : [c.code, c.message].filter(Boolean).join(': ') || err.message;
+        throw new Error(`Couldn't reach the game for ${what} (${why})`);
+      }
+      continue;
+    }
+    if (res.ok || res.status < 500) break; // retry once on a server hiccup
+  }
+  const text = await res.text();
+  if (!res.ok) throw new Error(`The game returned ${res.status} for ${what}${res.status === 401 || res.status === 403 ? ' (access refused)' : ''}`);
+  try { return JSON.parse(text); }
+  catch { throw new Error(`The game sent a web page instead of data for ${what} (often a bot check): ${text.slice(0, 80).replace(/\s+/g, ' ')}`); }
 }
 
 const fetchRaw = (teamId, md) => getJson(buildUrl(teamId, md), `team ${teamId}, matchday ${md}`);
