@@ -769,6 +769,11 @@
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
 
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then((reg) => reg.update()).catch(() => {});
+    // When a new version takes over, reload once so it shows immediately
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
+  }
   load();
 })();
