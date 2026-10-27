@@ -129,16 +129,15 @@ function findValue(node, keys, depth = 0) {
 }
 
 // Who is in the group: from the league standings if available, otherwise from league.config.json.
-async function getMembers(snapshotRaw) {
-  if (!LEAGUE_URL && !snapshotRaw) {
-    return { leagueName: config.leagueName, members: config.managers.map((m) => ({ ...m, official: null })) };
-  }
-  const raw = snapshotRaw || await fetchLeagueRaw();
+// Turns a league standings response into members. Works for the overall feed and for a
+// single-matchday feed (where pointsGamedayId names the matchday and gamedayPoints holds its scores).
+function mapMembers(raw) {
   const rows = findMemberArray(raw) || [];
-  if (!rows.length) throw new Error('No members found in the league standings. Check UEFA_LEAGUE_URL with /api/debug?league=1');
-  // Names in league.config.json (matched by team ID) override what the game shows, if you prefer nicknames.
+  if (!rows.length) throw new Error('No members found in the league standings.');
   const nick = new Map(config.managers.map((m) => [String(m.teamId), m]));
-  const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== '' ? n : null; };
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && v !== '' && v !== null ? n : null; };
+  const value = raw?.data?.value || {};
+  const mdSpecific = (num(value.pointsGamedayId) || 0) > 0;
   const members = rows.map((r) => {
     const teamId = String(pick(r, KEYS.memberId));
     const o = nick.get(teamId);
@@ -149,7 +148,7 @@ async function getMembers(snapshotRaw) {
       official: { rank: num(pick(r, KEYS.rank)), total: num(pick(r, KEYS.overall)) },
       // Extras from the standings feed (field names as of the 2026/27 game)
       worldRank: num(r.overAllRank),
-      mdPoints: num(r.currentGamedayPoints),
+      mdPoints: mdSpecific ? (num(r.gamedayPoints) ?? num(r.currentGamedayPoints)) : num(r.currentGamedayPoints),
       topPerformer: r.topPerformerId ? { id: String(r.topPerformerId), name: String(r.topPerformer || '').trim(), points: num(r.topPerformerValue) ?? 0 } : null,
       captainId: r.mdCaptain ? String(r.mdCaptain) : null,
       playerIds: Array.isArray(r.userPlayers) ? r.userPlayers.map(String) : [],
@@ -158,8 +157,19 @@ async function getMembers(snapshotRaw) {
       chips: { wildcard: num(r.wildCardMD) || null, limitless: num(r.limitlessMD) || null },
     };
   });
-  const latestMd = num(raw?.data?.value?.lp_gamedayId) || num(findValue(raw, ['lp_gamedayId', 'gamedayId']));
-  return { leagueName: findValue(raw, KEYS.leagueName) || config.leagueName, members, latestMd };
+  const latestMd = mdSpecific ? num(value.pointsGamedayId)
+    : num(value.lp_gamedayId) || num(findValue(raw, ['lp_gamedayId', 'gamedayId']));
+  return { leagueName: findValue(raw, KEYS.leagueName) || config.leagueName, members, latestMd, mdSpecific };
+}
+
+// What a member did in one matchday, kept in the season history.
+const mdRecord = (m) => ({ teamId: m.teamId, mdPoints: m.mdPoints, topPerformer: m.topPerformer, captainId: m.captainId, playerIds: m.playerIds });
+
+async function getMembers(snapshotRaw) {
+  if (!LEAGUE_URL && !snapshotRaw) {
+    return { leagueName: config.leagueName, members: config.managers.map((m) => ({ ...m, official: null })) };
+  }
+  return mapMembers(snapshotRaw || await fetchLeagueRaw());
 }
 
 function truthy(v) { return v === true || v === 1 || v === '1' || v === 'true'; }
@@ -253,22 +263,30 @@ const extrasOf = (m) => ({ worldRank: m.worldRank ?? null, transfers: m.transfer
 
 // With only the league URL: official table plus the latest matchday, built from each
 // member's top performer, captain and starting player IDs.
-function leagueOnly(leagueName, members, latestMd) {
+function leagueOnly(leagueName, members, latestMd, savedMds = {}) {
   const md = latestMd || 1;
-  const performers = new Map();
-  members.forEach((m) => { if (m.topPerformer && m.topPerformer.name) performers.set(m.topPerformer.id, m.topPerformer); });
-  const managers = members.map((m) => ({
-    id: m.teamId, name: m.name, teamName: m.teamName, official: m.official, ...extrasOf(m),
-    history: [{
-      md, partial: true,
-      points: m.mdPoints ?? 0,
-      players: [...performers.values()].filter((p) => m.playerIds.includes(p.id) || m.topPerformer?.id === p.id)
+  // Each matchday: saved results from earlier syncs, with the current feed covering the latest one
+  const byMd = { ...savedMds, [md]: { members: members.map(mdRecord) } };
+  const mds = Object.keys(byMd).map(Number).filter(Boolean).sort((a, b) => a - b);
+  const historyFor = (teamId) => mds.map((d) => {
+    const recs = byMd[d].members || [];
+    const rec = recs.find((x) => x.teamId === teamId);
+    if (!rec) return null;
+    const performers = new Map();
+    recs.forEach((x) => { if (x.topPerformer?.name) performers.set(x.topPerformer.id, x.topPerformer); });
+    return {
+      md: d, partial: true,
+      points: rec.mdPoints ?? 0,
+      players: [...performers.values()].filter((p) => (rec.playerIds || []).includes(p.id) || rec.topPerformer?.id === p.id)
         // Their own top performer first, so ties go to the game's pick
-        .sort((a, b) => (b.id === m.topPerformer?.id) - (a.id === m.topPerformer?.id))
-        .map((p) => ({ name: p.name, club: '', points: p.points, captain: p.id === m.captainId, bench: false })),
-    }],
+        .sort((a, b) => (b.id === rec.topPerformer?.id) - (a.id === rec.topPerformer?.id))
+        .map((p) => ({ name: p.name, club: '', points: p.points, captain: p.id === rec.captainId, bench: false })),
+    };
+  }).filter(Boolean);
+  const managers = members.map((m) => ({
+    id: m.teamId, name: m.name, teamName: m.teamName, official: m.official, ...extrasOf(m), history: historyFor(m.teamId),
   }));
-  return { mode: 'live', source: 'league-only', leagueName, updatedAt: new Date().toISOString(), matchdays: [md], managers };
+  return { mode: 'live', source: 'league-only', leagueName, updatedAt: new Date().toISOString(), matchdays: mds, managers };
 }
 
 async function loadLive() {
@@ -280,9 +298,10 @@ async function loadLive() {
     }
   }
   const { leagueName, members, latestMd } = await getMembers(snap?.raw);
+  const savedMds = snap ? ((await getSnapshot('history').catch(() => null))?.mds || {}) : {};
   const stamp = snap ? { updatedAt: snap.syncedAt, source: 'sync' } : {};
   const extras = await loadExtras();
-  if (!TEAM_URL || snap) return { ...leagueOnly(leagueName, members, latestMd), ...extras, ...stamp };
+  if (!TEAM_URL || snap) return { ...leagueOnly(leagueName, members, latestMd, savedMds), ...extras, ...stamp };
   const managers = await Promise.all(members.map(async (m) => {
     const mds = Array.from({ length: MAX_MD }, (_, i) => i + 1);
     const results = await Promise.all(mds.map(async (md) => {
@@ -340,4 +359,4 @@ function loadDemo() {
   return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, managers, nextDeadline };
 }
 
-module.exports = { findMemberArray, findValue, loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
+module.exports = { mapMembers, mdRecord, findMemberArray, findValue, loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
