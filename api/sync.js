@@ -1,4 +1,4 @@
-// POST /api/sync  { key, league, info? }  saves a copy of the league (and optionally the deadline feed)
+// POST /api/sync  { key, league, info?, md? }  saves a copy of the league (and optionally the deadline feed)
 // GET  /api/sync  setup status for the Sync page
 const { storeEnabled, setSnapshot, getSnapshot } = require('./_store');
 const { findMemberArray, findValue, mapMembers, mdRecord } = require('./_lib');
@@ -47,8 +47,11 @@ module.exports = async (req, res) => {
   }
 
   const syncedAt = new Date().toISOString();
-  const mapped = mapMembers(league);
+  const hint = body.md ? Number(body.md) : null;
+  if (hint !== null && !(Number.isInteger(hint) && hint >= 1 && hint <= 17)) return res.status(400).json({ ok: false, error: 'The matchday should be a number from 1 to 17.' });
+  const mapped = mapMembers(league, hint);
   const md = mapped.latestMd;
+  if (mapped.mdSpecific && !md) return res.status(400).json({ ok: false, error: 'This is a past matchday’s standings, but it doesn’t say which matchday. Enter the matchday number and sync again.' });
 
   // Season history: one entry per matchday, refreshed whenever that matchday is synced again
   const history = (await getSnapshot('history').catch(() => null)) || { mds: {} };

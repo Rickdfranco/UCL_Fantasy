@@ -76,6 +76,8 @@
       <p>Open your league URL in a browser, copy everything, and paste it here.</p>
       <label for="league">League data</label>
       <textarea id="league" spellcheck="false" placeholder='{"data":{"value":{"leagueName":…'></textarea>
+      <label for="md">Matchday (only when pasting a past matchday)</label>
+      <input id="md" type="number" inputmode="numeric" min="1" max="17" placeholder="e.g. 2">
       <details>
         <summary>Also update the deadline (optional)</summary>
         <label for="info">Deadline data (the response containing "deadline")</label>
@@ -120,15 +122,16 @@
     const key = $('key').value.trim();
     const league = $('league').value.trim();
     const info = $('info').value.trim();
+    const md = $('md').value.trim();
     if (!key) return say('Enter your sync key first.', false);
     if (!league) return say('Paste your league data first, or use the one-tap bookmark.', false);
     $('go').disabled = true; say('Syncing…', true);
     try {
-      const r = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, league, info: info || undefined }) });
+      const r = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, league, info: info || undefined, md: md || undefined }) });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || 'Sync failed');
       store.set('syncKey', key);
-      $('league').value = ''; $('info').value = '';
+      $('league').value = ''; $('info').value = ''; $('md').value = '';
       say(`Synced. ${j.summary}. Everyone will see it within a minute.`, true);
       status();
     } catch (e) { say(e.message, false); }
