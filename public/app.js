@@ -219,7 +219,7 @@
       </div>
       <h2>Season awards</h2>
       <div class="awards">
-        <div class="award"><p class="what">Most matchday wins</p><p class="who">${esc(topWins[0])}</p><p class="detail">${plural(topWins[1], 'win')}</p></div>
+        <div class="award"><p class="what">Biggest PP 🍆 - Most matchday wins</p><p class="who">${esc(topWins[0])}</p><p class="detail">${plural(topWins[1], 'win')}</p></div>
         <div class="award"><p class="what">Best single matchday</p><p class="who">${esc(bestDay.name)}</p><p class="detail">${bestDay.pts} pts on matchday ${bestDay.md}</p></div>
         ${topPlayer ? `<div class="award"><p class="what">Top player owned by the group</p><p class="who">${esc(topPlayer.name)}</p><p class="detail">${topPlayer.total} pts in matchdays someone owned him</p></div>` : ''}
         ${topBench && topBench[1] > 0 ? `<div class="award"><p class="what">Most points left on the bench</p><p class="who">${esc(topBench[0])}</p><p class="detail">${plural(topBench[1], 'pt')} wasted</p></div>` : ''}
