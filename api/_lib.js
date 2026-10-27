@@ -286,7 +286,7 @@ function leagueOnly(leagueName, members, latestMd, savedMds = {}) {
   const managers = members.map((m) => ({
     id: m.teamId, name: m.name, teamName: m.teamName, official: m.official, ...extrasOf(m), history: historyFor(m.teamId),
   }));
-  return { mode: 'live', source: 'league-only', leagueName, updatedAt: new Date().toISOString(), matchdays: mds, managers };
+  return { mode: 'live', source: 'league-only', leagueName, updatedAt: new Date().toISOString(), matchdays: mds, totalMatchdays: MAX_MD, managers };
 }
 
 async function loadLive() {
@@ -356,7 +356,7 @@ function loadDemo() {
   }));
   const now = Date.now();
   const nextDeadline = { md: 7, deadline: new Date(now + ((2 * 24 + 5) * 60 + 12) * 60000).toISOString(), kickoff: new Date(now + ((2 * 24 + 5) * 60 + 12) * 60000).toISOString() };
-  return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, managers, nextDeadline };
+  return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, totalMatchdays: 17, managers, nextDeadline };
 }
 
 module.exports = { mapMembers, mdRecord, findMemberArray, findValue, loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
