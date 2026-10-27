@@ -59,6 +59,18 @@ If you'd rather not use the league URL, list every person's name, team name and 
 | `MAX_MATCHDAY` | Optional. Highest matchday to check (default 17). |
 | `DEBUG_KEY` | Optional. Any password, used for the debug page below. |
 
+## 2b. Sync mode (if UEFA blocks Vercel)
+
+UEFA's bot protection ignores requests from cloud servers, so the app can't fetch your league by itself. Instead, a browser fetches it and the app stores a copy:
+
+1. In Vercel, open **Storage**, create an **Upstash for Redis** database (free) and connect it to this project. This adds the storage settings automatically.
+2. Add an environment variable `SYNC_KEY` with any password you choose. Share it only with friends you want to be able to sync.
+3. Keep `UEFA_LEAGUE_URL` set; the Sync page uses it to build the one-tap bookmark.
+4. Redeploy, then open `/sync.html` on your app. Drag the **Sync league** button to your bookmarks bar.
+5. On the UEFA fantasy site, click the bookmark. Your league is saved and everyone sees it within a minute.
+
+You can also paste the league data on the Sync page, plus the response containing `"deadline"` to update the countdown.
+
 ## 3. If the numbers look wrong
 
 The game uses short field names that can change between seasons. Open

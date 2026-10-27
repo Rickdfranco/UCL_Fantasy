@@ -3,6 +3,7 @@
 // so if the game changes its data format, this is the only file to fix.
 
 const config = require('../league.config.json');
+const { storeEnabled, getSnapshot } = require('./_store');
 
 const TEAM_URL = process.env.UEFA_TEAM_URL || '';      // template with {teamId} and {md}
 const COOKIE = process.env.UEFA_COOKIE || '';          // optional, your logged-in session cookie
@@ -16,7 +17,7 @@ const MAX_MD = parseInt(process.env.MAX_MATCHDAY || '17', 10);
 const configFilledIn = () => !config.managers.some((m) => String(m.teamId).startsWith('PASTE_'));
 // Live mode needs the team URL plus either the league URL or a filled-in config file.
 // Live mode needs the league URL, or the team URL plus a filled-in config file.
-const isDemo = () => !LEAGUE_URL && (!TEAM_URL || !configFilledIn());
+const isDemo = () => !storeEnabled() && !LEAGUE_URL && (!TEAM_URL || !configFilledIn());
 
 function buildUrl(teamId, md) {
   return TEAM_URL.replace(/\{teamId\}/g, encodeURIComponent(teamId)).replace(/\{md\}/g, md);
@@ -128,11 +129,11 @@ function findValue(node, keys, depth = 0) {
 }
 
 // Who is in the group: from the league standings if available, otherwise from league.config.json.
-async function getMembers() {
-  if (!LEAGUE_URL) {
+async function getMembers(snapshotRaw) {
+  if (!LEAGUE_URL && !snapshotRaw) {
     return { leagueName: config.leagueName, members: config.managers.map((m) => ({ ...m, official: null })) };
   }
-  const raw = await fetchLeagueRaw();
+  const raw = snapshotRaw || await fetchLeagueRaw();
   const rows = findMemberArray(raw) || [];
   if (!rows.length) throw new Error('No members found in the league standings. Check UEFA_LEAGUE_URL with /api/debug?league=1');
   // Names in league.config.json (matched by team ID) override what the game shows, if you prefer nicknames.
@@ -229,8 +230,10 @@ function parseDate(v) {
 
 async function loadDeadline() {
   if (MANUAL_DEADLINE) { const d = parseDate(MANUAL_DEADLINE); if (d && new Date(d) > Date.now()) return { md: null, deadline: d, kickoff: null }; }
-  if (!SCHEDULE_URL) return null;
-  const raw = await getJson(withBuster(SCHEDULE_URL), 'the matchday schedule');
+  let raw = null;
+  if (storeEnabled()) raw = (await getSnapshot('info').catch(() => null))?.raw || null;
+  if (!raw && SCHEDULE_URL && !storeEnabled()) raw = await getJson(withBuster(SCHEDULE_URL), 'the matchday schedule');
+  if (!raw) return null;
   const now = Date.now();
   const toEntry = (g) => ({ md: Number(pick(g, SKEYS.md)) || null, deadline: parseDate(pick(g, SKEYS.deadline)), kickoff: parseDate(pick(g, SKEYS.kickoff)) });
   // Single upcoming matchday (the game's player-list info feed), or a list of matchdays
@@ -269,9 +272,17 @@ function leagueOnly(leagueName, members, latestMd) {
 }
 
 async function loadLive() {
-  const { leagueName, members, latestMd } = await getMembers();
+  let snap = null;
+  if (storeEnabled()) {
+    snap = await getSnapshot('league');
+    if (!snap) {
+      return { ...loadDemo(), notice: 'Waiting for the first sync. Open the Sync page (/sync.html) to load your league.' };
+    }
+  }
+  const { leagueName, members, latestMd } = await getMembers(snap?.raw);
+  const stamp = snap ? { updatedAt: snap.syncedAt, source: 'sync' } : {};
   const extras = await loadExtras();
-  if (!TEAM_URL) return { ...leagueOnly(leagueName, members, latestMd), ...extras };
+  if (!TEAM_URL || snap) return { ...leagueOnly(leagueName, members, latestMd), ...extras, ...stamp };
   const managers = await Promise.all(members.map(async (m) => {
     const mds = Array.from({ length: MAX_MD }, (_, i) => i + 1);
     const results = await Promise.all(mds.map(async (md) => {
@@ -329,4 +340,4 @@ function loadDemo() {
   return { mode: 'demo', leagueName: 'Demo league', updatedAt: new Date().toISOString(), matchdays, managers, nextDeadline };
 }
 
-module.exports = { loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
+module.exports = { findMemberArray, findValue, loadDeadline, SCHEDULE_URL, withBuster, getJson, isDemo, loadLive, loadDemo, fetchRaw, fetchLeagueRaw, buildUrl, config, LEAGUE_URL };
