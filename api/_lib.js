@@ -37,11 +37,11 @@ async function getJson(url, what) {
   let res;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+      res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
     } catch (err) {
       if (attempt === 2) {
         const c = err.cause || {};
-        const why = err.name === 'TimeoutError' ? 'timed out after 8s'
+        const why = err.name === 'TimeoutError' ? 'timed out after 10s'
           : [c.code, c.message].filter(Boolean).join(': ') || err.message;
         throw new Error(`Couldn't reach the game for ${what} (${why})`);
       }
