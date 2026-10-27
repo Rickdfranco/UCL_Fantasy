@@ -690,7 +690,7 @@
       $('#updated').textContent = `Updated ${new Date(data.updatedAt).toLocaleString('en-US', { timeZone: DISPLAY_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`;
       const banner = $('#banner');
       banner.hidden = data.mode !== 'demo';
-      banner.textContent = 'You’re looking at demo data. Add your team IDs and data URL to see your real group (see the README).';
+      banner.textContent = data.notice || 'You’re looking at demo data. Add your team IDs and data URL to see your real group (see the README).';
       render();
     } catch (err) {
       if (!state.data) {

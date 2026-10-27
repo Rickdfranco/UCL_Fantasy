@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09090B">
+  <title>Sync league</title>
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 60px; }
+    .back { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+    .back:hover { color: var(--cream); }
+    h1 { margin-top: 14px; }
+    .lead { color: var(--silver); margin: 6px 0 0; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; margin-top: 16px; }
+    .card h2 { margin: 0 0 8px; }
+    .card h2::after { display: none; }
+    .card p { margin: 6px 0; color: var(--silver); font-size: 0.92rem; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin: 12px 0 6px; }
+    input, textarea { width: 100%; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: 0.9rem var(--sans); }
+    textarea { min-height: 110px; font-family: var(--mono); font-size: 0.8rem; resize: vertical; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .bm { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 999px; background: var(--cream); color: #0A0A0C; font-weight: 650; text-decoration: none; cursor: grab; }
+    .status { margin-top: 14px; padding: 12px 14px; border-radius: 12px; font-size: 0.92rem; border: 1px solid var(--line); }
+    .status.ok { border-color: rgba(143,191,152,.5); color: var(--up); }
+    .status.err { border-color: rgba(224,135,124,.5); color: var(--down); }
+    .check { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.9rem; }
+    .check li { padding: 3px 0; color: var(--silver); }
+    .check li::before { content: "○"; margin-right: 8px; color: var(--down); }
+    .check li.done::before { content: "●"; color: var(--up); }
+    details summary { cursor: pointer; color: var(--cream); font-size: 0.9rem; margin-top: 12px; }
+    ol { padding-left: 20px; color: var(--silver); font-size: 0.9rem; }
+    ol li { margin: 4px 0; }
+    code { font-family: var(--mono); font-size: 0.82rem; color: var(--cream); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">← Back to the app</a>
+    <h1>Sync league</h1>
+    <p class="lead" id="last">Checking…</p>
+
+    <div class="card" id="setup" hidden>
+      <h2>Finish setup in Vercel</h2>
+      <ul class="check" id="checklist"></ul>
+    </div>
+
+    <div class="card">
+      <h2>Your sync key</h2>
+      <p>Saved on this device after the first sync, so you only type it once.</p>
+      <label for="key">Sync key</label>
+      <input id="key" type="password" autocomplete="off" placeholder="The SYNC_KEY you set in Vercel">
+    </div>
+
+    <div class="card" id="bm-card" hidden>
+      <h2>One-tap sync</h2>
+      <p>Drag this button to your bookmarks bar. Then, whenever you’re on the UEFA fantasy site, click it.</p>
+      <div class="row"><a class="bm" id="bm" href="#">⚽ Sync league</a></div>
+      <details>
+        <summary>On a phone instead</summary>
+        <ol>
+          <li>Bookmark any page, then edit that bookmark.</li>
+          <li>Name it <code>Sync league</code> and replace its address with the code below.</li>
+          <li>On the UEFA fantasy site, type <code>Sync league</code> in the address bar and tap the bookmark suggestion.</li>
+        </ol>
+        <textarea id="bm-code" readonly></textarea>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Or paste it</h2>
+      <p>Open your league URL in a browser, copy everything, and paste it here.</p>
+      <label for="league">League data</label>
+      <textarea id="league" spellcheck="false" placeholder='{"data":{"value":{"leagueName":…'></textarea>
+      <details>
+        <summary>Also update the deadline (optional)</summary>
+        <label for="info">Deadline data (the response containing "deadline")</label>
+        <textarea id="info" spellcheck="false"></textarea>
+      </details>
+      <div class="row"><button class="pill-btn solid" id="go">Sync now</button></div>
+      <div class="status" id="msg" hidden role="status"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+  const when = (iso) => new Date(iso).toLocaleString('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+  const say = (text, ok) => { const m = $('msg'); m.hidden = false; m.className = 'status ' + (ok ? 'ok' : 'err'); m.textContent = text; };
+
+  $('key').value = store.get('syncKey') || '';
+
+  async function status() {
+    try {
+      const s = await (await fetch('/api/sync', { cache: 'no-store' })).json();
+      $('last').textContent = s.lastSync ? `Last synced ${when(s.lastSync)}` : 'Not synced yet';
+      const items = [
+        [s.storeReady, 'Storage connected (Upstash Redis from the Storage tab)'],
+        [s.keyConfigured, 'SYNC_KEY environment variable added'],
+        [!!s.leagueUrl, 'UEFA_LEAGUE_URL environment variable added'],
+      ];
+      $('setup').hidden = items.every(([ok]) => ok);
+      $('checklist').innerHTML = items.map(([ok, t]) => `<li class="${ok ? 'done' : ''}">${t}</li>`).join('');
+      if (s.leagueUrl) {
+        const target = location.origin + '/sync.html#d=';
+        const code = `javascript:(async()=>{const w=window.open('about:blank');try{if(!/gaming\\.uefa\\.com$/.test(location.hostname))throw new Error('open the UEFA fantasy site first');const r=await fetch(${JSON.stringify(s.leagueUrl)}+'&buster='+Date.now(),{credentials:'include'});const t=await r.text();JSON.parse(t);w.location=${JSON.stringify(target)}+encodeURIComponent(t);}catch(e){if(w)w.close();alert('Sync failed: '+e.message);}})();`;
+        $('bm').setAttribute('href', code);
+        $('bm-code').value = code;
+        $('bm-card').hidden = false;
+      }
+    } catch { $('last').textContent = 'Couldn’t check sync status.'; }
+  }
+
+  async function sync() {
+    const key = $('key').value.trim();
+    const league = $('league').value.trim();
+    const info = $('info').value.trim();
+    if (!key) return say('Enter your sync key first.', false);
+    if (!league) return say('Paste your league data first, or use the one-tap bookmark.', false);
+    $('go').disabled = true; say('Syncing…', true);
+    try {
+      const r = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, league, info: info || undefined }) });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Sync failed');
+      store.set('syncKey', key);
+      $('league').value = ''; $('info').value = '';
+      say(`Synced. ${j.summary}. Everyone will see it within a minute.`, true);
+      status();
+    } catch (e) { say(e.message, false); }
+    finally { $('go').disabled = false; }
+  }
+
+  $('go').addEventListener('click', sync);
+  $('bm').addEventListener('click', (e) => { e.preventDefault(); say('Drag this button to your bookmarks bar, then click it while you’re on the UEFA fantasy site.', true); });
+
+  // Arrived from the bookmark with data in the address
+  function fromHash() {
+    if (!location.hash.startsWith('#d=')) return;
+    try { $('league').value = decodeURIComponent(location.hash.slice(3)); } catch {}
+    history.replaceState(null, '', location.pathname);
+    if ($('key').value) sync(); else say('Got your league data. Enter your sync key and tap Sync now.', true);
+  }
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+  status();
+})();
+</script>
+</body>
+</html>
