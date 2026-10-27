@@ -56,12 +56,45 @@
   }
 
   // ---------- Rendering ----------
+  // Every matchday of the season: played ones with data, missing past ones, and upcoming ones
+  const latestPlayed = () => state.data.matchdays[state.data.matchdays.length - 1] ?? 0;
+  const totalMds = () => Math.max(state.data.totalMatchdays || 0, latestPlayed());
+  const mdStatus = (md) => state.data.matchdays.includes(md) ? 'played' : md > latestPlayed() ? 'future' : 'missing';
+
   function renderPicker() {
     const picker = $('#md-picker');
     picker.hidden = state.tab === 'season' || !state.data?.matchdays.length;
-    picker.innerHTML = state.data.matchdays.map((md) =>
-      `<button class="md-chip" data-md="${md}" aria-pressed="${md === state.md}">MD ${md}</button>`).join('');
-    picker.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    const all = Array.from({ length: totalMds() }, (_, i) => i + 1);
+    picker.innerHTML = all.map((md) => {
+      const st = mdStatus(md);
+      const label = st === 'future' ? `Matchday ${md}, coming up` : st === 'missing' ? `Matchday ${md}, not synced` : `Matchday ${md}`;
+      return `<button class="md-chip ${st}" data-md="${md}" aria-pressed="${md === state.md}" aria-label="${label}">MD ${md}</button>`;
+    }).join('');
+    const sel = picker.querySelector('[aria-pressed="true"]');
+    if (sel) picker.scrollLeft = sel.offsetLeft - picker.clientWidth / 2 + sel.offsetWidth / 2;
+  }
+
+  function renderPlaceholder() {
+    const md = state.md, st = mdStatus(md), nd = state.data.nextDeadline;
+    if (st === 'future') {
+      const isNext = nd?.md === md;
+      const next = latestPlayed() + 1;
+      view.innerHTML = `${isNext ? deadlineCard() : ''}
+        <div class="placeholder">
+          <p class="ph-kicker">Matchday ${md}</p>
+          <h2 class="ph-title">Coming up</h2>
+          <p class="ph-text">${isNext ? 'Get your transfers and captain sorted before the deadline. Scores land here once the matchday is played and synced.'
+            : `This matchday hasn’t been played yet.${md > next ? ` Matchday ${next} is next.` : ''} Scores land here once it’s played and synced.`}</p>
+        </div>`;
+    } else {
+      view.innerHTML = `
+        <div class="placeholder">
+          <p class="ph-kicker">Matchday ${md}</p>
+          <h2 class="ph-title">Not synced yet</h2>
+          <p class="ph-text">This matchday was played before the app started saving history, so its scores aren’t here yet. Everyone’s season totals already include it.</p>
+          <a class="pill-btn" href="/sync.html">Add it on the Sync page</a>
+        </div>`;
+    }
   }
 
   function renderTable() {
@@ -201,7 +234,8 @@
       view.innerHTML = '<div class="empty"><p>No matchdays have been played yet. Scores show up here after the first round of games.</p></div>';
       return;
     }
-    ({ table: renderTable, matchday: renderMatchday, season: renderSeason, rivals: renderRivals })[state.tab]();
+    if (state.tab !== 'season' && mdStatus(state.md) !== 'played') renderPlaceholder();
+    else ({ table: renderTable, matchday: renderMatchday, season: renderSeason, rivals: renderRivals })[state.tab]();
     animateIn();
     tickCountdowns();
   }
@@ -231,7 +265,7 @@
   function animateIn() {
     moveTabInk();
     view.classList.remove('view-swap'); void view.offsetWidth; view.classList.add('view-swap');
-    const items = view.querySelectorAll('h2, .note, .standings tbody tr, .winner, .recap-btn, .mgr, .chart-box, .award, .empty, .h2h-pick, .h2h-score, .h2h-gap, .wk, .fx, .countdown');
+    const items = view.querySelectorAll('.placeholder, h2, .note, .standings tbody tr, .winner, .recap-btn, .mgr, .chart-box, .award, .empty, .h2h-pick, .h2h-score, .h2h-gap, .wk, .fx, .countdown');
     items.forEach((el, i) => { el.classList.add('reveal'); el.style.setProperty('--i', Math.min(i, 12)); });
     view.querySelectorAll('[data-count]').forEach(countUp);
   }
@@ -684,7 +718,7 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.error);
       state.data = data;
-      if (!data.matchdays.includes(state.md)) state.md = data.matchdays[data.matchdays.length - 1] ?? null;
+      if (!state.md || state.md > Math.max(data.totalMatchdays || 0, ...data.matchdays)) state.md = data.matchdays[data.matchdays.length - 1] ?? null;
       $('#league-name').textContent = data.leagueName;
       document.title = data.leagueName;
       $('#updated').textContent = `Updated ${new Date(data.updatedAt).toLocaleString('en-US', { timeZone: DISPLAY_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}`;
