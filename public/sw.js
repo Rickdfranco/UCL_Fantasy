@@ -1,6 +1,7 @@
-// Service worker: app shell works offline, data is network-first with a cached fallback.
-const SHELL = 'shell-v1';
-const DATA = 'data-v1';
+// Service worker: always try the network first so updates show up right away,
+// and fall back to the saved copy only when offline.
+const SHELL = 'shell-v2';
+const DATA = 'data-v2';
 const ASSETS = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,16 +17,11 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin || e.request.method !== 'GET') return;
-  if (url.pathname.startsWith('/api/')) {
-    e.respondWith(fetch(e.request).then((res) => {
-      if (res.ok) { const copy = res.clone(); caches.open(DATA).then((c) => c.put(e.request, copy)); }
+  const bucket = url.pathname.startsWith('/api/') ? DATA : SHELL;
+  e.respondWith(
+    fetch(e.request, { cache: 'no-cache' }).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(bucket).then((c) => c.put(e.request, copy)); }
       return res;
-    }).catch(() => caches.match(e.request)));
-    return;
-  }
-  // Show the cached shell instantly, and refresh it in the background for next time.
-  e.respondWith(caches.open(SHELL).then((c) => c.match(e.request).then((hit) => {
-    const net = fetch(e.request).then((res) => { if (res.ok) c.put(e.request, res.clone()); return res; }).catch(() => hit);
-    return hit || net;
-  })));
+    }).catch(() => caches.match(e.request).then((hit) => hit || (e.request.mode === 'navigate' ? caches.match('/index.html') : undefined)))
+  );
 });
