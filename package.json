@@ -4,5 +4,5 @@
   "private": true,
   "description": "A shared scoreboard PWA for a Champions League fantasy group",
   "engines": { "node": ">=18" },
-  "scripts": { "start": "node tools/local-server.js", "dev": "vercel dev" }
+  "scripts": { "start": "node tools/local-server.js", "dev": "vercel dev", "autosync": "node tools/auto-sync.js" }
 }
